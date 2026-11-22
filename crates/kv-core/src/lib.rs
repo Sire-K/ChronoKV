@@ -1,5 +1,6 @@
 pub mod page;
 pub mod wal;
+pub mod store;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
