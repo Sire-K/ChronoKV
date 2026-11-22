@@ -1,6 +1,6 @@
 pub mod page;
-pub mod wal;
 pub mod store;
+pub mod wal;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
@@ -10,6 +10,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 mod tests {
     use super::*;
     use crate::page::{Page, PAGE_PAYLOAD_SIZE, PAGE_SIZE};
+    use crate::store::Store;
     use crate::wal::Wal;
     use std::io;
 
@@ -61,5 +62,39 @@ mod tests {
         raw[8..12].copy_from_slice(&(PAGE_SIZE as u32).to_le_bytes());
 
         assert!(Page::from_bytes(&raw).is_err());
+    }
+
+    #[test]
+    fn store_wal_recovery_and_page_snapshots() -> io::Result<()> {
+        let wal_path = "/tmp/test_store_chronokv.wal";
+        let pages_path = "/tmp/test_store_chronokv.pages";
+        let _ = std::fs::remove_file(wal_path);
+        let _ = std::fs::remove_file(pages_path);
+
+        {
+            let mut store = Store::open(wal_path, pages_path)?;
+            store.set("k1", b"v1")?;
+            store.set("k2", b"v2")?;
+            assert_eq!(store.del("k1")?, true);
+            assert_eq!(store.get("k1"), None);
+            assert_eq!(store.get("k2"), Some(b"v2".as_slice()));
+
+            let written_pages = store.write_snapshot_pages()?;
+            assert!(written_pages >= 1);
+        }
+
+        // Reopen without touching WAL manually—state must come back from WAL replay.
+        let mut reopened = Store::open(wal_path, pages_path)?;
+        assert_eq!(reopened.get("k1"), None);
+        assert_eq!(reopened.get("k2"), Some(b"v2".as_slice()));
+
+        let pages = reopened.read_snapshot_pages()?;
+        assert!(!pages.is_empty());
+        assert_eq!(pages[0].header.page_id, 0);
+
+        let pages_file_len = std::fs::metadata(pages_path)?.len();
+        assert_eq!(pages_file_len % (PAGE_SIZE as u64), 0);
+
+        Ok(())
     }
 }
