@@ -65,6 +65,28 @@ mod tests {
     }
 
     #[test]
+    fn wal_replay_stops_on_corrupted_record() -> io::Result<()> {
+        let path = "/tmp/test_corrupt_chronokv.wal";
+        let _ = std::fs::remove_file(path);
+
+        {
+            let mut wal = Wal::open(path)?;
+            wal.append_set("good:1", b"ok")?;
+            wal.append_set("bad:2", b"secret")?;
+        }
+
+        let mut bytes = std::fs::read(path)?;
+        let last_idx = bytes.len() - 1;
+        bytes[last_idx] ^= 0xFF;
+        std::fs::write(path, &bytes)?;
+
+        let state = Wal::replay(path)?;
+        assert_eq!(state.get("good:1").map(Vec::as_slice), Some(b"ok".as_slice()));
+        assert_eq!(state.get("bad:2"), None);
+        Ok(())
+    }
+
+    #[test]
     fn store_wal_recovery_and_page_snapshots() -> io::Result<()> {
         let wal_path = "/tmp/test_store_chronokv.wal";
         let pages_path = "/tmp/test_store_chronokv.pages";
