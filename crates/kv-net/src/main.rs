@@ -1,3 +1,5 @@
+mod resp;
+
 use kv_core::store::Store;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
