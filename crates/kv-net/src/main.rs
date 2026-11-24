@@ -55,6 +55,7 @@ fn handle_client(stream: TcpStream, store: Arc<Mutex<Store>>) -> io::Result<()> 
 }
 
 fn main() -> io::Result<()> {
+
     let data_dir = PathBuf::from("/tmp/chronokv");
     std::fs::create_dir_all(&data_dir)?;
 
@@ -62,7 +63,7 @@ fn main() -> io::Result<()> {
     let pages_path = data_dir.join("chronokv.pages");
     let store = Arc::new(Mutex::new(Store::open(&wal_path, &pages_path)?));
 
-    let addr = "127.0.0.1:6379";
+    let addr = "0.0.0.0:6379";
     let listener = TcpListener::bind(addr)?;
     println!("ChronoKV listening on {addr}");
 
