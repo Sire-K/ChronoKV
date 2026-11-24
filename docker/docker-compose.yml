@@ -15,7 +15,7 @@ services:
       dockerfile: Dockerfile
     environment:
       CHRONOKV_HOST: chronokv
-      CHRONOKV_PORT: "0.0.0.0:6379"
+      CHRONOKV_PORT: "6379"
       EMBEDDING_MODEL: all-MiniLM-L6-v2
       SIMILARITY_THRESHOLD: "0.78"
     ports:
