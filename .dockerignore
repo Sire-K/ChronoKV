@@ -1,0 +1,5 @@
+target/
+semantic-cache/.venv/
+.git/
+*.wal
+*.pages
