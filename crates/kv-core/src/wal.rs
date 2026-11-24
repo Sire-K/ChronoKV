@@ -6,6 +6,34 @@ use std::path::Path;
 const OP_SET: u8 = 1;
 const OP_DEL: u8 = 2;
 
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+fn compute_record_crc(op: u8, key_bytes: &[u8], val_bytes: &[u8]) -> io::Result<u32> {
+    let key_len = u32::try_from(key_bytes.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "key too large"))?;
+    let val_len = u32::try_from(val_bytes.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "value too large"))?;
+
+    let mut payload = Vec::with_capacity(1 + 4 + 4 + key_bytes.len() + val_bytes.len());
+    payload.push(op);
+    payload.extend_from_slice(&key_len.to_le_bytes());
+    payload.extend_from_slice(&val_len.to_le_bytes());
+    payload.extend_from_slice(key_bytes);
+    payload.extend_from_slice(val_bytes);
+
+    Ok(crc32_ieee(&payload))
+}
+
 pub struct Wal {
     writer: BufWriter<File>,
 }
@@ -27,7 +55,9 @@ impl Wal {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "key too large"))?;
         let val_len = u32::try_from(value.len())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "value too large"))?;
+        let crc = compute_record_crc(OP_SET, key_bytes, value)?;
 
+        self.writer.write_all(&crc.to_le_bytes())?;
         self.writer.write_all(&[OP_SET])?;
         self.writer.write_all(&key_len.to_le_bytes())?;
         self.writer.write_all(&val_len.to_le_bytes())?;
@@ -41,7 +71,9 @@ impl Wal {
         let key_bytes = key.as_bytes();
         let key_len = u32::try_from(key_bytes.len())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "key too large"))?;
+        let crc = compute_record_crc(OP_DEL, key_bytes, &[])?;
 
+        self.writer.write_all(&crc.to_le_bytes())?;
         self.writer.write_all(&[OP_DEL])?;
         self.writer.write_all(&key_len.to_le_bytes())?;
         self.writer.write_all(&0u32.to_le_bytes())?;
@@ -60,11 +92,17 @@ impl Wal {
 
         let mut reader = BufReader::new(file);
         loop {
-            let mut op_buf = [0u8; 1];
-            match reader.read_exact(&mut op_buf) {
+            let mut crc_buf = [0u8; 4];
+            match reader.read_exact(&mut crc_buf) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e),
+            }
+            let expected_crc = u32::from_le_bytes(crc_buf);
+
+            let mut op_buf = [0u8; 1];
+            if reader.read_exact(&mut op_buf).is_err() {
+                break;
             }
 
             let mut len_buf = [0u8; 8];
@@ -82,6 +120,11 @@ impl Wal {
 
             let mut val_buf = vec![0u8; val_len];
             if reader.read_exact(&mut val_buf).is_err() {
+                break;
+            }
+
+            let actual_crc = compute_record_crc(op_buf[0], &key_buf, &val_buf)?;
+            if actual_crc != expected_crc {
                 break;
             }
 
