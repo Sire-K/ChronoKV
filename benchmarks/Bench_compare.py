@@ -5,7 +5,6 @@ import urllib.request
 import numpy as np
 import psycopg
 
-
 def resp_cmd(sock: socket.socket, *parts: str) -> bytes:
     chunks = [f"*{len(parts)}\r\n".encode()]
     for p in parts:
