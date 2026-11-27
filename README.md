@@ -41,3 +41,26 @@ chronokv/
 │   └── docker-compose.yml
 └── docs/
     └── architecture.md
+
+## System Architecture
+
+```text
++-------------------+      HTTP/JSON       +-----------------------+
+|   Client / LLM    | -------------------> |    semantic-cache     |
+|     Pipeline      | <--- (hit / score) - | FastAPI + CUDA MiniLM |
++-------------------+                      +-----------+-----------+
+                                                       | RESP / TCP (:6379)
+                                                       v
+                                           +-----------------------+
+                                           |        kv-net         |
+                                           |   RESP TCP Listener   |
+                                           +-----------+-----------+
+                                                       |
+                                                       v
+                                           +-----------------------+
+                                           |        kv-core        |
+                                           | 4 KB Pages + CRC32 WAL|
+                                           +-----------+-----------+
+                                                       |
+                                                       v
+                                              /data (Docker Volume)
