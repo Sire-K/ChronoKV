@@ -33,7 +33,6 @@ def resp_cmd(sock: socket.socket, *parts: str) -> bytes:
         return bytes(buf[:n])
     return payload
 
-
 def bench_resp(host: str, port: int, n_ops: int = 1000) -> dict:
     lat_ms = []
     with socket.create_connection((host, port), timeout=10) as s:
