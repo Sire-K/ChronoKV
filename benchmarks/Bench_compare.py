@@ -5,48 +5,49 @@ import urllib.request
 import numpy as np
 import psycopg
 
-def resp_cmd(sock: socket.socket, *parts: str) -> bytes:
+def resp_cmd(sock: socket.socket, rfile, *parts: str) -> bytes:
     chunks = [f"*{len(parts)}\r\n".encode()]
     for p in parts:
         b = p.encode()
         chunks.append(f"${len(b)}\r\n".encode() + b + b"\r\n")
     sock.sendall(b"".join(chunks))
 
-    line = b""
-    while not line.endswith(b"\r\n"):
-        chunk = sock.recv(4096)
-        if not chunk:
-            raise ConnectionError("EOF from RESP server")
-        line += chunk
-    prefix = line[:1]
-    payload = line[1:-2]
+    header = rfile.readline()
+    if not header:
+        raise ConnectionError("EOF from RESP server")
+    if not header.endswith(b"\r\n"):
+        raise ValueError(f"Malformed RESP line: {header!r}")
+
+    prefix = header[:1]
+    payload = header[1:-2]
     if prefix in (b"+", b":", b"-"):
         return payload
     if prefix == b"$":
         n = int(payload)
         if n < 0:
             return b""
-        buf = bytearray()
-        while len(buf) < n + 2:
-            buf.extend(sock.recv(4096))
-        return bytes(buf[:n])
+        data = rfile.read(n + 2)
+        if len(data) < n + 2:
+            raise ConnectionError("EOF reading bulk payload")
+        return data[:n]
     return payload
+
 
 def bench_resp(host: str, port: int, n_ops: int = 1000) -> dict:
     lat_ms = []
     with socket.create_connection((host, port), timeout=10) as s:
-        # Warmup
+        rfile = s.makefile("rb")
         for i in range(50):
-            resp_cmd(s, "SET", f"warm:{i}", "val")
-            resp_cmd(s, "GET", f"warm:{i}")
+            resp_cmd(s, rfile, "SET", f"warm:{i}", "val")
+            resp_cmd(s, rfile, "GET", f"warm:{i}")
 
         t0 = time.perf_counter()
         for i in range(n_ops):
             k = f"bench:key:{i}"
             v = f"payload-value-{i}-" + ("x" * 64)
             s0 = time.perf_counter()
-            resp_cmd(s, "SET", k, v)
-            resp_cmd(s, "GET", k)
+            resp_cmd(s, rfile, "SET", k, v)
+            resp_cmd(s, rfile, "GET", k)
             lat_ms.append((time.perf_counter() - s0) * 1000.0)
         elapsed = time.perf_counter() - t0
 
@@ -57,7 +58,6 @@ def bench_resp(host: str, port: int, n_ops: int = 1000) -> dict:
         "p95_ms": round(float(np.percentile(arr, 95)), 3),
         "p99_ms": round(float(np.percentile(arr, 99)), 3),
     }
-
 
 def bench_semantic_cache(n_queries: int = 50) -> dict:
     seed_queries = [
